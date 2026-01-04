@@ -1,0 +1,20 @@
+name: rageQuests
+version: 1.0
+main: ru.ragerise.pw.ragequests.Main
+api-version: 1.16
+authors: [YourName]
+commands:
+  quest1:
+    description: Открыть страницу квестов 1
+    usage: /quest1
+  quest2:
+    description: Открыть страницу квестов 2
+    usage: /quest2
+  quest3:
+    description: Открыть страницу квестов 3
+    usage: /quest3
+  ragequests:
+    description: Админ-команды плагина
+    usage: /ragequests <reload|reset|complete|setquest>
+    permission: ragequests.admin
+    permission-message: §cУ вас нет прав на эту команду.

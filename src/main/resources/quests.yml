@@ -1,0 +1,86 @@
+# ═══════════════════════════════════════════════════════════
+# RageQuests — Квесты и награды
+# ID квестов — последовательные (1, 2, 3...)
+# ID наград — любые (рекомендуется 100+)
+# ═══════════════════════════════════════════════════════════
+
+quests:
+  # ────────────────────── Обычные квесты ──────────────────────
+  1:
+    type: COLLECT
+    name: "&#FFAA00Соберите алмазы"
+    description:
+      - "&#AAAAAAСоберите 10 алмазов"
+      - ""
+      - "&#FFD700Награда за этап: 5 алмазов"
+    icon: DIAMOND
+    material: DIAMOND
+    amount: 10
+    rewards:                                      # Предметы, выдаются в конце этапа
+      - "DIAMOND:5"
+      - "GOLD_INGOT:10"
+
+  2:
+    type: KILL_MOB
+    name: "&#FF5555Убейте зомби"
+    description:
+      - "&#AAAAAAУничтожьте 30 зомби"
+      - ""
+      - "&#FFD700Они опасны ночью!"
+    icon: ROTTEN_FLESH
+    entity: ZOMBIE
+    amount: 30
+    rewards:
+      - "EMERALD:5"
+
+  3:
+    type: COLLECT
+    name: "&#00FFFFЖелезная добыча"
+    description:
+      - "&#AAAAAAДобудьте 50 железных слитков"
+    icon: IRON_INGOT
+    material: IRON_INGOT
+    amount: 50
+    rewards:
+      - "IRON_BLOCK:3"
+
+  # ────────────────────── Награды (REWARD) ──────────────────────
+  101:
+    type: REWARD
+    name: "&#FFD700Бонус за начало"
+    description:
+      - "&#FFD700Содержимое бонуса:"
+      - "• &#00FFFFNetherite слиток ×1"
+      - "• &#00FF00500 монет"
+      - "• &#FFAA00Эффект скорости"
+      - ""
+      - "%reward_requirement%"                   # Показывается только если заблокировано
+      - "%reward_status%"                        # Всегда показывается (меняется по статусу)
+    icon: CHEST
+    unlock-after: 2                               # Разблокируется после квеста ID 2 (0 = сразу)
+    commands:
+      - "[MESSAGE] &#00FF00Поздравляем! Вы получили бонус!"
+      - "[ACTIONBAR] &#FFD700+ Netherite и деньги!"
+      - "[SOUND] ENTITY_PLAYER_LEVELUP 1.0 1.5"
+      - "[PARTICLE] TOTEM ~ ~1 ~ 0 0 0 0.3 50 force"
+      - "[COMMAND] give {player} netherite_ingot 1"
+      - "[COMMAND] eco give {player} 500"
+      - "[COMMAND] effect give {player} speed 600 1"
+
+  102:
+    type: REWARD
+    name: "&#FF00FFФинальная награда этапа"
+    description:
+      - "&#FFAA00Легендарный бонус за завершение этапа!"
+      - ""
+      - "• 5 зачарованных золотых яблок"
+      - "• Эффекты и сюрприз"
+      - ""
+      - "%reward_status%"
+    icon: NETHER_STAR
+    unlock-after: 3
+    commands:
+      - "[BROADCAST] &#FFD700Игрок &#FFAA00{player} &#FFD700завершил этап квестов!"
+      - "[MESSAGE] &#FF00FFВы — легенда!"
+      - "[COMMAND] give {player} enchanted_golden_apple 5"
+      - "[PARTICLE] FIREWORKS_SPARK ~ ~ ~ 1 2 1 0.1 100 force"
