@@ -1,5 +1,7 @@
 package ru.ragerise.pw.ragequests.gui;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.*;
@@ -9,6 +11,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -16,7 +19,6 @@ import ru.ragerise.pw.ragequests.Main;
 import ru.ragerise.pw.ragequests.player.PlayerData;
 import ru.ragerise.pw.ragequests.quests.Displayable;
 import ru.ragerise.pw.ragequests.quests.Quest;
-import ru.ragerise.pw.ragequests.quests.QuestType;
 import ru.ragerise.pw.ragequests.quests.Reward;
 import ru.ragerise.pw.ragequests.util.ColorUtil;
 
@@ -32,6 +34,23 @@ public class QuestGUI implements Listener {
 
     public QuestGUI(Main plugin) {
         this.plugin = plugin;
+    }
+
+    private static class QuestInventoryHolder implements InventoryHolder {
+        private final int page;
+
+        QuestInventoryHolder(int page) {
+            this.page = page;
+        }
+
+        public int getPage() {
+            return page;
+        }
+
+        @Override
+        public Inventory getInventory() {
+            return null;
+        }
     }
 
     public void open(Player player, int page) {
@@ -57,10 +76,12 @@ public class QuestGUI implements Listener {
             return;
         }
 
-        String title = ColorUtil.color(plugin.getConfig().getString("gui.raw-title", "Квесты")
+        String legacyTitle = ColorUtil.color(plugin.getConfig().getString("gui.raw-title", "Квесты")
                 .replace("%page%", String.valueOf(page)).trim());
 
-        Inventory inv = Bukkit.createInventory(null, plugin.getConfig().getInt("gui.size", 54), title);
+        Component title = LegacyComponentSerializer.legacyAmpersand().deserialize(legacyTitle);
+
+        Inventory inv = Bukkit.createInventory(new QuestInventoryHolder(page), plugin.getConfig().getInt("gui.size", 54), title);
 
         List<Integer> itemIds = plugin.getQuestManager().getStageItemIds(page);
         List<Integer> slots = plugin.getQuestManager().getStageSlots(page);
@@ -99,51 +120,51 @@ public class QuestGUI implements Listener {
     public void onClick(InventoryClickEvent e) {
         if (!(e.getWhoClicked() instanceof Player p)) return;
         if (e.getCurrentItem() == null) return;
-        if (e.getView().title().contains(ColorUtil.color(plugin.getConfig().getString("gui.raw-title", "Квесты").trim()))) {
 
-            e.setCancelled(true);
+        if (!(e.getInventory().getHolder() instanceof QuestInventoryHolder)) return;
 
-            ItemStack clicked = e.getCurrentItem();
-            ItemMeta meta = clicked.getItemMeta();
-            if (meta == null) return;
+        e.setCancelled(true);
 
-            Integer id = meta.getPersistentDataContainer().get(plugin.getQuestIdKey(), PersistentDataType.INTEGER);
-            if (id == null) return;
+        ItemStack clicked = e.getCurrentItem();
+        ItemMeta meta = clicked.getItemMeta();
+        if (meta == null) return;
 
-            Displayable displayable = plugin.getQuestManager().getDisplayable(id);
-            if (displayable == null) return;
+        Integer id = meta.getPersistentDataContainer().get(plugin.getQuestIdKey(), PersistentDataType.INTEGER);
+        if (id == null) return;
 
-            PlayerData data = PlayerData.get(p);
-            if (data == null) return;
+        Displayable displayable = plugin.getQuestManager().getDisplayable(id);
+        if (displayable == null) return;
 
-            if (displayable instanceof Reward reward) {
-                boolean claimed = data.isClaimed(reward.getId());
-                boolean available = data.getCurrentQuest() > reward.getUnlockAfter();
+        PlayerData data = PlayerData.get(p);
+        if (data == null) return;
 
-                if (claimed) {
-                    p.sendMessage(ColorUtil.color("&cВы уже забрали эту награду."));
-                    return;
-                }
+        if (displayable instanceof Reward reward) {
+            boolean claimed = data.isClaimed(reward.getId());
+            boolean available = data.getCurrentQuest() > reward.getUnlockAfter();
 
-                if (!available) {
-                    p.sendMessage(ColorUtil.color("&cЭта награда ещё недоступна."));
-                    return;
-                }
-
-                data.claimReward(reward.getId());
-                plugin.getStorageManager().savePlayerData(p);
-
-                executeRewardCommands(p, reward.getCommands());
-
-                p.sendMessage(ColorUtil.color("&aНаграда получена!"));
-
-                Integer currentPage = playerOpenPage.get(p.getUniqueId());
-                if (currentPage != null) {
-                    open(p, currentPage);
-                }
-
+            if (claimed) {
+                p.sendMessage(ColorUtil.color(plugin.getConfig().getString("messages.reward-already")));
                 return;
             }
+
+            if (!available) {
+                p.sendMessage(ColorUtil.color(plugin.getConfig().getString("messages.reward-locked")));
+                return;
+            }
+
+            data.claimReward(reward.getId());
+            plugin.getStorageManager().savePlayerData(p);
+
+            executeRewardCommands(p, reward.getCommands());
+
+            p.sendMessage(ColorUtil.color(plugin.getConfig().getString("messages.reward-claimed")));
+
+            Integer currentPage = playerOpenPage.get(p.getUniqueId());
+            if (currentPage != null) {
+                open(p, currentPage);
+            }
+
+            return;
         }
     }
 
