@@ -22,10 +22,10 @@ import java.util.*;
 public class QuestManager implements Listener {
 
     private final Main plugin;
-    public final Map<Integer, Quest> questsById = new HashMap<>();
+    private final Map<Integer, Quest> questsById = new HashMap<>();
     private final Map<Integer, Reward> rewardsById = new HashMap<>();
 
-    public final List<List<Integer>> stageItemIds = new ArrayList<>();
+    private final List<List<Integer>> stageItemIds = new ArrayList<>();
     private final List<List<Integer>> stageSlots = new ArrayList<>();
 
     public QuestManager(Main plugin) {
@@ -306,5 +306,9 @@ public class QuestManager implements Listener {
 
     public void unloadPlayerData(Player player) {
         PlayerData.remove(player);
+    }
+
+    public Map<Integer, Quest> getQuestsById() {
+        return questsById;
     }
 }
