@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDeathEvent;
+import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.player.PlayerPickupItemEvent;
 import org.bukkit.inventory.ItemStack;
 import ru.ragerise.pw.ragequests.Main;
@@ -21,10 +22,10 @@ import java.util.*;
 public class QuestManager implements Listener {
 
     private final Main plugin;
-    private final Map<Integer, Quest> questsById = new HashMap<>();
+    public final Map<Integer, Quest> questsById = new HashMap<>();
     private final Map<Integer, Reward> rewardsById = new HashMap<>();
 
-    private final List<List<Integer>> stageItemIds = new ArrayList<>();
+    public final List<List<Integer>> stageItemIds = new ArrayList<>();
     private final List<List<Integer>> stageSlots = new ArrayList<>();
 
     public QuestManager(Main plugin) {
@@ -45,21 +46,9 @@ public class QuestManager implements Listener {
             return;
         }
 
-        List<Integer> allIds = new ArrayList<>();
         for (String key : cfg.getConfigurationSection("quests").getKeys(false)) {
-            allIds.add(Integer.parseInt(key));
-        }
-        allIds.sort(Integer::compareTo);
-
-        int stage = 1;
-        List<Integer> currentStageIds = new ArrayList<>();
-        List<Integer> currentStageSlots = new ArrayList<>();
-
-        for (int id : allIds) {
-            currentStageIds.add(id);
-            currentStageSlots.add(currentStageIds.size() - 1);
-
-            var sec = cfg.getConfigurationSection("quests." + id);
+            var sec = cfg.getConfigurationSection("quests." + key);
+            int id = Integer.parseInt(key);
             String typeStr = sec.getString("type", "").toUpperCase();
             QuestType type;
             try {
@@ -101,49 +90,66 @@ public class QuestManager implements Listener {
                         try {
                             EntityType entity = EntityType.valueOf(sec.getString("entity", "").toUpperCase());
                             quest = new KillMobQuest(id, name, desc, icon, entity, amount, itemRewards);
-                        } catch (Exception ignored) {}
+                        } catch (IllegalArgumentException ignored) {}
                     }
                     case KILL_WITH_ITEM -> {
-                        Material mat = Material.matchMaterial(sec.getString("item", "").toUpperCase());
-                        if (mat != null) {
-                            quest = new KillWithItemQuest(id, name, desc, icon, mat, amount, itemRewards);
+                        Material item = Material.matchMaterial(sec.getString("item", "").toUpperCase());
+                        if (item != null) {
+                            quest = new KillWithItemQuest(id, name, desc, icon, item, amount, itemRewards);
                         }
                     }
                     case KILL_PLAYER_WITH_ITEM -> {
-                        Material mat = Material.matchMaterial(sec.getString("item", "").toUpperCase());
+                        Material item = Material.matchMaterial(sec.getString("item", "").toUpperCase());
+                        if (item != null) {
+                            quest = new KillPlayerWithItemQuest(id, name, desc, icon, item, amount, itemRewards);
+                        }
+                    }
+                    case CRAFT -> {
+                        Material mat = Material.matchMaterial(sec.getString("material", "").toUpperCase());
                         if (mat != null) {
-                            quest = new KillPlayerWithItemQuest(id, name, desc, icon, mat, amount, itemRewards);
+                            quest = new CraftQuest(id, name, desc, icon, mat, amount, itemRewards);
                         }
                     }
                 }
 
                 if (quest != null) {
                     questsById.put(id, quest);
+                } else {
+                    plugin.getLogger().warning("Ошибка создания квеста ID " + id);
                 }
             }
+        }
 
-            if (sec.getBoolean("end-of-stage", false)) {
-                stageItemIds.add(new ArrayList<>(currentStageIds));
-                stageSlots.add(new ArrayList<>(currentStageSlots));
-                currentStageIds.clear();
-                currentStageSlots.clear();
-                stage++;
+        // Загрузка этапов
+        if (plugin.getConfig().contains("gui.stages")) {
+            Set<String> stageKeys = plugin.getConfig().getConfigurationSection("gui.stages").getKeys(false);
+            List<Integer> sortedStages = stageKeys.stream().map(Integer::parseInt).sorted().toList();
+
+            for (int stageNum : sortedStages) {
+                String path = "gui.stages." + stageNum;
+                List<Integer> itemIds = plugin.getConfig().getIntegerList(path + ".item-ids");
+                List<Integer> slots = plugin.getConfig().getIntegerList(path + ".slots");
+
+                stageItemIds.add(itemIds);
+                stageSlots.add(slots);
             }
         }
 
-        if (!currentStageIds.isEmpty()) {
-            stageItemIds.add(currentStageIds);
-            stageSlots.add(currentStageSlots);
-        }
+        plugin.debug("Загружено " + questsById.size() + " квестов и " + rewardsById.size() + " наград.");
+    }
+
+    public Displayable getDisplayable(int id) {
+        Quest q = questsById.get(id);
+        if (q != null) return q;
+        return rewardsById.get(id);
+    }
+
+    public Quest getQuestById(int id) {
+        return questsById.get(id);
     }
 
     public int getStageCount() {
         return stageItemIds.size();
-    }
-
-    public int getQuestCountInStage(int stage) {
-        if (stage < 1 || stage > stageItemIds.size()) return 0;
-        return stageItemIds.get(stage - 1).size();
     }
 
     public List<Integer> getStageItemIds(int stage) {
@@ -156,19 +162,37 @@ public class QuestManager implements Listener {
         return stageSlots.get(stage - 1);
     }
 
-    public Displayable getDisplayable(int id) {
-        if (questsById.containsKey(id)) return questsById.get(id);
-        if (rewardsById.containsKey(id)) return rewardsById.get(id);
-        return null;
+    public int getQuestCountInStage(int stage) {
+        if (stage < 1 || stage > stageItemIds.size()) return 0;
+        return (int) stageItemIds.get(stage - 1).stream().filter(id -> questsById.containsKey(id)).count();
     }
 
-    public Quest getQuestById(int id) {
-        return questsById.get(id);
+    public boolean isLastQuestInStage(Quest quest) {
+        for (int s = 0; s < stageItemIds.size(); s++) {
+            List<Integer> ids = stageItemIds.get(s);
+            int lastQuestId = -1;
+            for (int id : ids) {
+                if (questsById.containsKey(id)) {
+                    lastQuestId = id;
+                }
+            }
+            if (lastQuestId == quest.getId()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @EventHandler
     public void onPickup(PlayerPickupItemEvent e) {
+        if (e.isCancelled()) return;
         handleProgress(e.getPlayer(), e);
+    }
+
+    @EventHandler
+    public void onCraft(CraftItemEvent e) {
+        if (!(e.getWhoClicked() instanceof Player player)) return;
+        handleProgress(player, e);
     }
 
     @EventHandler
@@ -179,6 +203,12 @@ public class QuestManager implements Listener {
     }
 
     private void handleProgress(Player player, org.bukkit.event.Event event) {
+
+        if (!plugin.isMaintenanceAllowed(player)) {
+            return; // не засчитываем прогресс
+        }
+
+
         PlayerData data = PlayerData.get(player);
         if (data == null) return;
 
@@ -193,6 +223,7 @@ public class QuestManager implements Listener {
             if (newProgress >= currentQuest.getRequiredAmount()) {
                 completeQuest(player, currentQuest);
             }
+
 
             plugin.getStorageManager().savePlayerData(player);
         }
@@ -219,7 +250,7 @@ public class QuestManager implements Listener {
                 }
             }
             if (stageIndex != -1) {
-                player.sendMessage(ColorUtil.color("&a✔ Этап завершён! Получаете награды за этап:"));
+//                player.sendMessage(ColorUtil.color("&a✔ Этап завершён! Получаете награды за этап:"));
 
                 for (int id : stageItemIds.get(stageIndex)) {
                     Quest q = questsById.get(id);
@@ -235,19 +266,13 @@ public class QuestManager implements Listener {
         checkAndStartNext(player);
     }
 
-    private boolean isLastQuestInStage(Quest quest) {
-        for (List<Integer> stage : stageItemIds) {
-            if (stage.contains(quest.getId()) && stage.indexOf(quest.getId()) == stage.size() - 1) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public void checkAndStartNext(Player player) {
         PlayerData data = PlayerData.get(player);
         Quest next = questsById.get(data.getCurrentQuest());
         if (next != null) {
+//            String msg = plugin.getConfig().getString("messages.quest-started", "&aНачат квест: %quest%")
+//                    .replace("%quest%", next.getName());
+//            player.sendMessage(ColorUtil.color(msg));
         }
     }
 

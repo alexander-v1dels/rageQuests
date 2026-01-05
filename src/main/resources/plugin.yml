@@ -2,7 +2,7 @@ name: rageQuests
 version: 1.0
 main: ru.ragerise.pw.ragequests.Main
 api-version: 1.16
-authors: [YourName]
+authors: [niges]
 commands:
   quest1:
     description: Открыть страницу квестов 1
@@ -14,6 +14,7 @@ commands:
     description: Открыть страницу квестов 3
     usage: /quest3
   ragequests:
+    aliases: [rq]
     description: Админ-команды плагина
     usage: /ragequests <reload|reset|complete|setquest>
     permission: ragequests.admin

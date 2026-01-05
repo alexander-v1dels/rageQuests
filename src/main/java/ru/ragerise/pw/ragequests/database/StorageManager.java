@@ -49,6 +49,7 @@ public class StorageManager {
             return;
         }
 
+        // SQLITE или MYSQL — используем HikariCP
         HikariConfig hikari = new HikariConfig();
 
         if (type == StorageType.MYSQL) {
@@ -60,7 +61,7 @@ public class StorageManager {
             hikari.setJdbcUrl("jdbc:mysql://" + host + ":" + port + "/" + database + "?useSSL=" + useSSL);
             hikari.setUsername(plugin.getConfig().getString("storage.mysql.username", "root"));
             hikari.setPassword(plugin.getConfig().getString("storage.mysql.password", ""));
-        } else {
+        } else { // SQLITE
             String fileName = plugin.getConfig().getString("storage.sqlite-file", "data.db");
             File dbFile = new File(plugin.getDataFolder(), fileName);
             hikari.setJdbcUrl("jdbc:sqlite:" + dbFile.getAbsolutePath());
@@ -103,13 +104,15 @@ public class StorageManager {
                 data.setCurrentQuest(yaml.getInt(path + "current_quest", 1));
                 data.setCurrentProgress(yaml.getInt(path + "current_progress", 0));
 
+                // claimed_rewards для YAML
                 Set<Integer> claimed = new HashSet<>();
                 claimed.addAll(yaml.getIntegerList(path + "claimed_rewards"));
                 data.setClaimedRewards(claimed);
+
             } else {
-                String sql = "SELECT * FROM ragequests_players WHERE uuid = ?";
+                // SQL
                 try (Connection c = ds.getConnection();
-                     PreparedStatement ps = c.prepareStatement(sql)) {
+                     PreparedStatement ps = c.prepareStatement("SELECT * FROM ragequests_players WHERE uuid = ?")) {
                     ps.setString(1, uuid);
                     ResultSet rs = ps.executeQuery();
 
@@ -117,6 +120,7 @@ public class StorageManager {
                         data.setCurrentQuest(rs.getInt("current_quest"));
                         data.setCurrentProgress(rs.getInt("current_progress"));
 
+                        // claimed_rewards для SQL
                         Set<Integer> claimed = new HashSet<>();
                         String claimedStr = rs.getString("claimed_rewards");
                         if (claimedStr != null && !claimedStr.isEmpty()) {
@@ -128,6 +132,7 @@ public class StorageManager {
                         }
                         data.setClaimedRewards(claimed);
                     } else {
+                        // Новый игрок
                         try (PreparedStatement insert = c.prepareStatement(
                                 "INSERT INTO ragequests_players (uuid, current_quest, current_progress, claimed_rewards) VALUES (?, 1, 0, '')")) {
                             insert.setString(1, uuid);
@@ -138,6 +143,7 @@ public class StorageManager {
             }
         } catch (Exception e) {
             plugin.getLogger().warning("Ошибка загрузки данных игрока " + player.getName() + ": " + e.getMessage());
+            // Фолбэк на дефолт
             data.setCurrentQuest(1);
             data.setCurrentProgress(0);
             data.setClaimedRewards(new HashSet<>());
@@ -152,6 +158,7 @@ public class StorageManager {
 
         String uuid = player.getUniqueId().toString();
 
+        // Выделяем логику сохранения в отдельный Runnable
         Runnable saveTask = () -> {
             try {
                 if (type == StorageType.YAML) {
@@ -181,10 +188,12 @@ public class StorageManager {
             }
         };
 
+        // Если плагин всё ещё enabled — сохраняем асинхронно
+        // Если уже disabled (например, при /plugman reload или onDisable) — сохраняем синхронно
         if (plugin.isEnabled()) {
             plugin.getServer().getScheduler().runTaskAsynchronously(plugin, saveTask);
         } else {
-            saveTask.run();
+            saveTask.run(); // синхронно, без ошибки IllegalPluginAccessException
         }
     }
 

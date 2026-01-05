@@ -1,7 +1,5 @@
 package ru.ragerise.pw.ragequests.gui;
 
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.*;
@@ -11,7 +9,6 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -19,7 +16,9 @@ import ru.ragerise.pw.ragequests.Main;
 import ru.ragerise.pw.ragequests.player.PlayerData;
 import ru.ragerise.pw.ragequests.quests.Displayable;
 import ru.ragerise.pw.ragequests.quests.Quest;
+import ru.ragerise.pw.ragequests.quests.QuestType;
 import ru.ragerise.pw.ragequests.quests.Reward;
+import ru.ragerise.pw.ragequests.quests.types.CollectQuest;
 import ru.ragerise.pw.ragequests.util.ColorUtil;
 
 import java.util.HashMap;
@@ -36,25 +35,15 @@ public class QuestGUI implements Listener {
         this.plugin = plugin;
     }
 
-    private static class QuestInventoryHolder implements InventoryHolder {
-        private final int page;
-
-        QuestInventoryHolder(int page) {
-            this.page = page;
-        }
-
-        public int getPage() {
-            return page;
-        }
-
-        @Override
-        public Inventory getInventory() {
-            return null;
-        }
-    }
-
     public void open(Player player, int page) {
         PlayerData data = PlayerData.get(player);
+
+        if (!plugin.isMaintenanceAllowed(player)) {
+            player.sendMessage(ColorUtil.color(plugin.getConfig().getString("messages.maintenance-denied",
+                    "&cКвесты временно недоступны — техническое обслуживание.")));
+            return;
+        }
+
         if (data == null) {
             player.sendMessage(ColorUtil.color("&cОшибка загрузки данных. Перезайдите."));
             return;
@@ -76,19 +65,16 @@ public class QuestGUI implements Listener {
             return;
         }
 
-        String legacyTitle = ColorUtil.color(plugin.getConfig().getString("gui.raw-title", "Квесты")
+        String title = ColorUtil.color(plugin.getConfig().getString("gui.raw-title", "Квесты")
                 .replace("%page%", String.valueOf(page)).trim());
 
-        Component title = LegacyComponentSerializer.legacyAmpersand().deserialize(legacyTitle);
-
-        Inventory inv = Bukkit.createInventory(new QuestInventoryHolder(page), plugin.getConfig().getInt("gui.size", 54), title);
+        Inventory inv = Bukkit.createInventory(null, plugin.getConfig().getInt("gui.size", 54), title);
 
         List<Integer> itemIds = plugin.getQuestManager().getStageItemIds(page);
         List<Integer> slots = plugin.getQuestManager().getStageSlots(page);
 
         for (int i = 0; i < Math.min(itemIds.size(), slots.size()); i++) {
             int id = itemIds.get(i);
-            int slot = slots.get(i);
             Displayable displayable = plugin.getQuestManager().getDisplayable(id);
             if (displayable == null) continue;
 
@@ -100,28 +86,42 @@ public class QuestGUI implements Listener {
                 completed = q.getId() < data.getCurrentQuest();
                 active = q.getId() == data.getCurrentQuest();
                 progress = active ? data.getCurrentProgress() : (completed ? q.getRequiredAmount() : 0);
-            } else if (displayable instanceof Reward r) {
-                completed = data.isClaimed(r.getId());
-                active = !completed && data.getCurrentQuest() > r.getUnlockAfter();
-                progress = 0;
+
+                if (!active && !completed) {
+                    Material mat = Material.matchMaterial(plugin.getConfig().getString("gui.locked-quest.material", "BARRIER").toUpperCase());
+                    if (mat == null) mat = Material.BARRIER;
+
+                    ItemStack lockedItem = new ItemStack(mat);
+                    ItemMeta meta = lockedItem.getItemMeta();
+                    meta.setDisplayName(ColorUtil.color(plugin.getConfig().getString("gui.locked-quest.name", "&cКвест заблокирован")));
+                    meta.setLore(plugin.getConfig().getStringList("gui.locked-quest.lore").stream().map(ColorUtil::color).toList());
+                    lockedItem.setItemMeta(meta);
+
+                    inv.setItem(slots.get(i), lockedItem);
+                    continue;
+                }
             } else {
-                continue;
+                // Reward
+                Reward r = (Reward) displayable;
+                completed = data.isClaimed(r.getId());
+                active = data.getCurrentQuest() > r.getUnlockAfter();
+                progress = 0;
             }
 
-            ItemStack item = displayable.createDisplayItem(progress, completed, active, plugin);
-            inv.setItem(slot, item);
+            inv.setItem(slots.get(i), displayable.createDisplayItem(progress, completed, active && !completed, plugin));
         }
 
-        player.openInventory(inv);
         playerOpenPage.put(player.getUniqueId(), page);
+        player.openInventory(inv);
     }
 
     @EventHandler(priority = EventPriority.HIGH)
-    public void onClick(InventoryClickEvent e) {
+    public void onInventoryClick(InventoryClickEvent e) {
         if (!(e.getWhoClicked() instanceof Player p)) return;
         if (e.getCurrentItem() == null) return;
 
-        if (!(e.getInventory().getHolder() instanceof QuestInventoryHolder)) return;
+        String title = ColorUtil.color(plugin.getConfig().getString("gui.raw-title", "Квесты").replace("%page%", ""));
+        if (!e.getView().getTitle().startsWith(title)) return;
 
         e.setCancelled(true);
 
@@ -132,33 +132,87 @@ public class QuestGUI implements Listener {
         Integer id = meta.getPersistentDataContainer().get(plugin.getQuestIdKey(), PersistentDataType.INTEGER);
         if (id == null) return;
 
-        Displayable displayable = plugin.getQuestManager().getDisplayable(id);
-        if (displayable == null) return;
-
         PlayerData data = PlayerData.get(p);
         if (data == null) return;
 
+        Displayable displayable = plugin.getQuestManager().getDisplayable(id);
+
+        // === Обработка наград (ваш существующий код) ===
         if (displayable instanceof Reward reward) {
-            boolean claimed = data.isClaimed(reward.getId());
-            boolean available = data.getCurrentQuest() > reward.getUnlockAfter();
-
-            if (claimed) {
-                p.sendMessage(ColorUtil.color(plugin.getConfig().getString("messages.reward-already")));
+            if (data.isClaimed(id)) {
+                p.sendMessage(ColorUtil.color("&cЭта награда уже забрана!"));
                 return;
             }
 
-            if (!available) {
-                p.sendMessage(ColorUtil.color(plugin.getConfig().getString("messages.reward-locked")));
+            if (!(reward.getUnlockAfter() == 0 || data.getCurrentQuest() > reward.getUnlockAfter())) {
+                p.sendMessage(ColorUtil.color(plugin.getConfig().getString("messages.reward-locked", "&cНаграда ещё заблокирована!")));
                 return;
             }
-
-            data.claimReward(reward.getId());
-            plugin.getStorageManager().savePlayerData(p);
 
             executeRewardCommands(p, reward.getCommands());
 
-            p.sendMessage(ColorUtil.color(plugin.getConfig().getString("messages.reward-claimed")));
+            data.claimReward(id);
+            plugin.getStorageManager().savePlayerData(p);
 
+            p.sendMessage(ColorUtil.color(plugin.getConfig().getString("messages.reward-claimed", "&aНаграда успешно получена!")));
+            p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.2f);
+
+            e.getInventory().setItem(e.getSlot(), reward.createDisplayItem(0, true, false, plugin));
+            return;
+        }
+
+        // === Новая логика для CollectQuest ===
+        if (displayable instanceof Quest quest && quest.getId() == data.getCurrentQuest() && quest.getType() == QuestType.COLLECT) {
+            CollectQuest collectQuest = (CollectQuest) quest;
+            Material requiredMaterial = collectQuest.getMaterial();
+            int currentProgress = data.getCurrentProgress();
+            int required = collectQuest.getRequiredAmount();
+            int needed = required - currentProgress;
+
+            if (needed <= 0) {
+                p.sendMessage(ColorUtil.color("&cКвест уже завершён."));
+                return;
+            }
+
+            // Подсчёт доступных предметов
+            int available = 0;
+            for (ItemStack stack : p.getInventory().getStorageContents()) {
+                if (stack != null && stack.getType() == requiredMaterial) {
+                    available += stack.getAmount();
+                }
+            }
+
+            int toTake = Math.min(needed, available);
+
+            if (toTake <= 0) {
+//                p.sendMessage(ColorUtil.color("&cУ вас нет требуемых предметов (&7" + requiredMaterial.name().toLowerCase() + "&c)."));
+                return;
+            }
+
+            // Забираем предметы
+            int remaining = toTake;
+            for (ItemStack stack : p.getInventory().getStorageContents()) {
+                if (remaining > 0 && stack != null && stack.getType() == requiredMaterial) {
+                    int remove = Math.min(remaining, stack.getAmount());
+                    stack.setAmount(stack.getAmount() - remove);
+                    remaining -= remove;
+                }
+            }
+
+            // Обновляем прогресс
+            data.setCurrentProgress(currentProgress + toTake);
+            plugin.getStorageManager().savePlayerData(p);
+
+//            p.sendMessage(ColorUtil.color("&aСдано &e" + toTake + " &a× &l" + requiredMaterial.name().toLowerCase() + "&a. Прогресс: &e" + data.getCurrentProgress() + "&7/&e" + required));
+//            p.playSound(p.getLocation(), Sound.ENTITY_ITEM_PICKUP, 1.0f, 1.5f);
+
+            // Если квест завершён — завершаем его
+            boolean completedNow = data.getCurrentProgress() >= required;
+            if (completedNow) {
+                plugin.getQuestManager().forceCompleteCurrent(p);
+            }
+
+            // Переоткрываем тот же этап для актуального отображения
             Integer currentPage = playerOpenPage.get(p.getUniqueId());
             if (currentPage != null) {
                 open(p, currentPage);
@@ -166,6 +220,11 @@ public class QuestGUI implements Listener {
 
             return;
         }
+
+        // Для остальных квестов — просто информация (по желанию)
+//        if (displayable instanceof Quest quest) {
+//            p.sendMessage(ColorUtil.color("&eКвест: &f" + quest.getName()));
+//        }
     }
 
     private void executeRewardCommands(Player player, List<String> commands) {
@@ -211,7 +270,9 @@ public class QuestGUI implements Listener {
                         double speed = Double.parseDouble(parts[7]);
                         int count = Integer.parseInt(parts[8]);
 
-                        player.spawnParticle(particle, target, count, ox, oy, oz, speed);
+                        boolean force = parts.length > 9 && "force".equalsIgnoreCase(parts[9]);
+
+                        player.spawnParticle(particle, target, count, ox, oy, oz, speed, force);
                     }
                 }
             } catch (Exception ex) {

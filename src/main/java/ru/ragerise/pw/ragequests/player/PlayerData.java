@@ -12,7 +12,7 @@ public class PlayerData {
     private static final Map<UUID, PlayerData> cache = new HashMap<>();
 
     private final Player player;
-    private int currentQuest = 1;
+    private int currentQuest = 1;                  // Текущий квест (ID)
     private int currentProgress = 0;
     private Set<Integer> claimedRewards = new HashSet<>();
 
@@ -32,6 +32,7 @@ public class PlayerData {
         cache.remove(player.getUniqueId());
     }
 
+    // ← Единые методы
     public int getCurrentQuest() { return currentQuest; }
     public void setCurrentQuest(int currentQuest) { this.currentQuest = currentQuest; }
 
